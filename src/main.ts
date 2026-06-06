@@ -52,10 +52,10 @@ class GameScene extends Phaser.Scene {
   private keyCannon!: Phaser.Input.Keyboard.Key;
   private player!: Phaser.Physics.Arcade.Image;
   private playerGlow!: Phaser.GameObjects.Image;
+  private laserGraphics!: Phaser.GameObjects.Graphics;
   private barrierGraphics!: Phaser.GameObjects.Graphics;
   private enemies!: Phaser.Physics.Arcade.Group;
   private missiles!: Phaser.Physics.Arcade.Group;
-  private cannonShots!: Phaser.Physics.Arcade.Group;
   private enemyBullets!: Phaser.Physics.Arcade.Group;
   private lockGraphics!: Phaser.GameObjects.Graphics;
   private hudText!: Phaser.GameObjects.Text;
@@ -96,7 +96,6 @@ class GameScene extends Phaser.Scene {
 
     this.enemies = this.physics.add.group();
     this.missiles = this.physics.add.group();
-    this.cannonShots = this.physics.add.group();
     this.enemyBullets = this.physics.add.group();
 
     this.player = this.physics.add.image(GAME_WIDTH / 2, GAME_HEIGHT - 160, "playerShip");
@@ -107,6 +106,9 @@ class GameScene extends Phaser.Scene {
     this.playerGlow = this.add.image(this.player.x, this.player.y, "playerGlow");
     this.playerGlow.setDepth(18);
     this.playerGlow.setAlpha(0.7);
+
+    this.laserGraphics = this.add.graphics();
+    this.laserGraphics.setDepth(17);
 
     this.barrierGraphics = this.add.graphics();
     this.barrierGraphics.setDepth(23);
@@ -127,7 +129,7 @@ class GameScene extends Phaser.Scene {
     });
     this.hudText.setDepth(50);
 
-    this.statusText = this.add.text(GAME_WIDTH / 2, 84, "方向鍵移動  A 機砲  S 飛彈", {
+    this.statusText = this.add.text(GAME_WIDTH / 2, 84, "方向鍵移動  A 雷射  S 飛彈", {
       fontFamily: "Arial",
       fontSize: "24px",
       color: "#ffe28a",
@@ -144,14 +146,6 @@ class GameScene extends Phaser.Scene {
       undefined,
       this
     );
-    this.physics.add.overlap(
-      this.cannonShots,
-      this.enemies,
-      (shot, enemy) => this.onCannonHit(shot, enemy),
-      undefined,
-      this
-    );
-
     this.time.addEvent({
       delay: 2600,
       loop: true,
@@ -182,6 +176,7 @@ class GameScene extends Phaser.Scene {
     this.updateTargeting();
     this.drawTargetLocks(time);
     this.handleWeapons(time);
+    this.handleLaser(time);
     this.handleSaber();
     this.handleShield();
     this.updateHud();
@@ -194,7 +189,6 @@ class GameScene extends Phaser.Scene {
     this.makeEnemyTexture("enemy_shooter", 0xff8bd1, 0xa66cff);
     this.makeEnemyTexture("enemy_spark", 0xb7ff55, 0x2ee6a6);
     this.makeCircleTexture("missile", 0xfff4a3, 18, 0xff8f3d);
-    this.makeCircleTexture("cannon", 0x7df7ff, 9, 0xffffff);
     this.makeCircleTexture("enemyBullet", 0xffb1d8, 12, 0xffffff);
     this.makeCircleTexture("starParticle", 0xffeb75, 8, 0xffffff);
     this.makeGlowTexture();
@@ -437,12 +431,6 @@ class GameScene extends Phaser.Scene {
       return true;
     });
 
-    this.cannonShots.children.each((child) => {
-      const shot = child as Phaser.Physics.Arcade.Image;
-      if (shot.y < -40) shot.destroy();
-      return true;
-    });
-
     this.enemyBullets.children.each((child) => {
       const bullet = child as Phaser.Physics.Arcade.Image;
       if (bullet.body && Math.abs(bullet.body.velocity.y) < 1) {
@@ -546,10 +534,54 @@ class GameScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyMissiles) && time - this.lastMissileAt >= GAME_CONFIG.missileCooldownMs) {
       this.fireMissiles(time);
     }
+  }
 
-    if (this.keyCannon.isDown && time - this.lastCannonAt >= GAME_CONFIG.cannonCooldownMs) {
-      this.fireCannon(time);
+  private handleLaser(time: number) {
+    this.laserGraphics.clear();
+
+    if (!this.keyCannon.isDown) {
+      return;
     }
+
+    const beamX = this.player.x;
+    const beamStartY = this.player.y - 76;
+    const beamEndY = -20;
+    const beamWidth = 36 + Math.sin(time / 70) * 5;
+
+    this.drawLaserBeam(beamX, beamStartY, beamEndY, beamWidth, time);
+
+    if (time - this.lastCannonAt < GAME_CONFIG.cannonCooldownMs) {
+      return;
+    }
+
+    this.lastCannonAt = time;
+    this.enemies.children.each((child) => {
+      const enemy = child as Phaser.Physics.Arcade.Image;
+      if (!enemy.active) {
+        return true;
+      }
+
+      const onBeam = Math.abs(enemy.x - beamX) <= beamWidth && enemy.y <= beamStartY && enemy.y >= beamEndY;
+      if (onBeam) {
+        this.scoreState.cannonHits += 1;
+        this.destroyEnemy(enemy, "cannon");
+      }
+      return true;
+    });
+  }
+
+  private drawLaserBeam(beamX: number, beamStartY: number, beamEndY: number, beamWidth: number, time: number) {
+    const innerPulse = 0.72 + Math.sin(time / 45) * 0.16;
+
+    this.laserGraphics.fillStyle(0x7df7ff, 0.13);
+    this.laserGraphics.fillRect(beamX - beamWidth, beamEndY, beamWidth * 2, beamStartY - beamEndY);
+    this.laserGraphics.lineStyle(16, 0x7df7ff, 0.25);
+    this.laserGraphics.lineBetween(beamX, beamStartY, beamX, beamEndY);
+    this.laserGraphics.lineStyle(8, 0xffffff, innerPulse);
+    this.laserGraphics.lineBetween(beamX, beamStartY, beamX, beamEndY);
+    this.laserGraphics.lineStyle(3, 0xfff4a3, 0.9);
+    this.laserGraphics.lineBetween(beamX - 10, beamStartY, beamX - 4, beamEndY);
+    this.laserGraphics.lineBetween(beamX + 10, beamStartY, beamX + 4, beamEndY);
   }
 
   private fireMissiles(time: number) {
@@ -569,16 +601,6 @@ class GameScene extends Phaser.Scene {
       this.scoreState.missilesFired += 1;
     });
     this.showStatus(`飛彈齊射 x${this.lockedEnemies.length}`);
-  }
-
-  private fireCannon(time: number) {
-    this.lastCannonAt = time;
-    const shot = this.physics.add.image(this.player.x, this.player.y - 72, "cannon");
-    shot.setDepth(15);
-    shot.setRotation(0);
-    shot.setVelocityY(-760);
-    shot.setCircle(8);
-    this.cannonShots.add(shot);
   }
 
   private fireEnemyBullet(enemy: Phaser.Physics.Arcade.Image) {
@@ -636,15 +658,6 @@ class GameScene extends Phaser.Scene {
   ) {
     (missileObject as Phaser.GameObjects.GameObject).destroy();
     this.destroyEnemy(enemyObject as Phaser.Physics.Arcade.Image, "missile");
-  }
-
-  private onCannonHit(
-    shotObject: unknown,
-    enemyObject: unknown
-  ) {
-    (shotObject as Phaser.GameObjects.GameObject).destroy();
-    this.scoreState.cannonHits += 1;
-    this.destroyEnemy(enemyObject as Phaser.Physics.Arcade.Image, "cannon");
   }
 
   private destroyEnemy(enemy: Phaser.Physics.Arcade.Image, source: "missile" | "cannon" | "saber") {
@@ -713,6 +726,7 @@ class GameScene extends Phaser.Scene {
     this.isEnded = true;
     this.physics.pause();
     this.lockGraphics.clear();
+    this.laserGraphics.clear();
     this.add.rectangle(GAME_WIDTH / 2, GAME_HEIGHT / 2, GAME_WIDTH, GAME_HEIGHT, 0x101827, 0.78).setDepth(80);
 
     const medals = this.getMedals();
