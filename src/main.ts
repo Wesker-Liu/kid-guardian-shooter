@@ -233,7 +233,9 @@ class GameScene extends Phaser.Scene {
   private accountDraftName = "";
   private accountKeyHandler?: (event: KeyboardEvent) => void;
   private selectedLevel = 1;
+  private pendingShopNext: "levelSelect" | "battle" = "levelSelect";
   private shopSelection: Record<EquipmentKind, string> = { ship: "sky", laser: "cyan", barrier: "aqua" };
+  private shopMessage = "";
   private lockedTargets: Phaser.Physics.Arcade.Image[] = [];
   private boss: BossState | null = null;
   private scoreState!: ScoreState;
@@ -676,7 +678,7 @@ class GameScene extends Phaser.Scene {
       this.addButton(GAME_WIDTH / 2, 285 + index * 72, `${account.name}  金幣 ${account.coins}`, () => {
         this.activeAccount = account;
         this.saveAccounts();
-        this.showLevelSelectScreen();
+        this.showShopScreen("levelSelect");
       });
     });
 
@@ -754,7 +756,7 @@ class GameScene extends Phaser.Scene {
       this.accounts.push(account);
       this.activeAccount = account;
       this.saveAccounts();
-      this.showLevelSelectScreen();
+      this.showShopScreen("levelSelect");
     };
 
     this.accountKeyHandler = (event: KeyboardEvent) => {
@@ -859,7 +861,7 @@ class GameScene extends Phaser.Scene {
         image.setInteractive({ useHandCursor: true });
         const choose = () => {
           this.selectedLevel = boss.level;
-          this.showShopScreen();
+          this.startBattle();
         };
         card.on("pointerdown", choose);
         image.on("pointerdown", choose);
@@ -869,17 +871,21 @@ class GameScene extends Phaser.Scene {
     this.addButton(168, 1008, "切換帳號", () => this.showAccountScreen(), 220, 0x38506f);
   }
 
-  private showShopScreen() {
+  private showShopScreen(next: "levelSelect" | "battle" = "levelSelect", resetSelection = true) {
     if (!this.activeAccount) return;
 
     this.mode = "shop";
     this.clearUi();
     this.setPlayVisible(false);
-    this.shopSelection = { ...this.activeAccount.equipped };
+    this.pendingShopNext = next;
+    if (resetSelection) {
+      this.shopSelection = { ...this.activeAccount.equipped };
+      this.shopMessage = "";
+    }
 
     this.addUi(
       this.add
-        .text(GAME_WIDTH / 2, 70, `第${this.selectedLevel}關戰前換裝   金幣：${this.activeAccount.coins}`, {
+        .text(GAME_WIDTH / 2, 70, `換裝備   金幣：${this.activeAccount.coins}`, {
           fontFamily: "Arial",
           fontSize: "30px",
           color: "#f9fbff",
@@ -894,8 +900,25 @@ class GameScene extends Phaser.Scene {
     this.drawEquipmentRow("laser", "雷射顏色", 415);
     this.drawEquipmentRow("barrier", "防護罩顏色", 640);
 
-    this.addButton(GAME_WIDTH / 2, 940, "確認換裝並出發", () => this.confirmLoadout(), 330, 0x0c9f87);
-    this.addButton(166, 1018, "回關卡", () => this.showLevelSelectScreen(), 220, 0x38506f);
+    this.addUi(
+      this.add
+        .text(GAME_WIDTH / 2, 862, this.shopMessage, {
+          fontFamily: "Arial",
+          fontSize: "23px",
+          color: "#ffe28a",
+          stroke: "#101827",
+          strokeThickness: 4,
+          align: "center"
+        })
+        .setOrigin(0.5)
+    );
+
+    const confirmLabel = this.pendingShopNext === "levelSelect" ? "確認換裝" : "確認換裝並出發";
+    this.addButton(GAME_WIDTH / 2, 940, confirmLabel, () => this.confirmLoadout(), 330, 0x0c9f87);
+    this.addButton(166, 1018, this.pendingShopNext === "levelSelect" ? "切換帳號" : "回關卡", () => {
+      if (this.pendingShopNext === "levelSelect") this.showAccountScreen();
+      else this.showLevelSelectScreen();
+    }, 220, 0x38506f);
   }
 
   private drawEquipmentRow(kind: EquipmentKind, title: string, y: number) {
@@ -923,7 +946,7 @@ class GameScene extends Phaser.Scene {
       rect.setInteractive({ useHandCursor: true });
       rect.on("pointerdown", () => {
         this.shopSelection[kind] = option.id;
-        this.showShopScreen();
+        this.showShopScreen(this.pendingShopNext, false);
       });
 
       const label = owned ? "已購買" : `${option.cost} 金幣`;
@@ -955,8 +978,9 @@ class GameScene extends Phaser.Scene {
     });
 
     const totalCost = purchases.reduce((sum, item) => sum + item.option.cost, 0);
-    if (this.activeAccount.coins < totalCost) {
-      window.alert(`金幣不足，還需要 ${totalCost - this.activeAccount.coins} 金幣`);
+      if (this.activeAccount.coins < totalCost) {
+      this.shopMessage = `金幣不足，還需要 ${totalCost - this.activeAccount.coins} 金幣`;
+      this.showShopScreen(this.pendingShopNext, false);
       return;
     }
 
@@ -964,7 +988,11 @@ class GameScene extends Phaser.Scene {
     purchases.forEach(({ kind, option }) => this.activeAccount!.owned[kind].push(option.id));
     this.activeAccount.equipped = { ...this.shopSelection };
     this.saveAccounts();
-    this.startBattle();
+    if (this.pendingShopNext === "levelSelect") {
+      this.showLevelSelectScreen();
+    } else {
+      this.startBattle();
+    }
   }
 
   private startBattle() {
@@ -1577,7 +1605,7 @@ class GameScene extends Phaser.Scene {
     }, 250, 0x38506f);
     this.addButton(GAME_WIDTH / 2 + 170, GAME_HEIGHT / 2 + 260, "再玩一次", () => {
       this.physics.resume();
-      this.showShopScreen();
+      this.showShopScreen("battle");
     }, 250, 0x0c9f87);
   }
 
