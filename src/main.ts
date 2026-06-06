@@ -6,7 +6,6 @@ type GameMode = "account" | "levelSelect" | "shop" | "play" | "result";
 type EquipmentKind = "ship" | "laser" | "barrier";
 
 interface GameConfig {
-  durationMs: number;
   bossSpawnMs: number;
   playerSpeed: number;
   missileCooldownMs: number;
@@ -78,8 +77,7 @@ interface BossState {
 }
 
 const GAME_CONFIG: GameConfig = {
-  durationMs: 180_000,
-  bossSpawnMs: 70_000,
+  bossSpawnMs: 25_000,
   playerSpeed: 360,
   missileCooldownMs: 720,
   laserCooldownMs: 120,
@@ -225,8 +223,7 @@ class GameScene extends Phaser.Scene {
   private enemyBullets!: Phaser.Physics.Arcade.Group;
   private weakpoints!: Phaser.Physics.Arcade.Group;
   private lockGraphics!: Phaser.GameObjects.Graphics;
-  private hudText!: Phaser.GameObjects.Text;
-  private statusText!: Phaser.GameObjects.Text;
+  private coinHudGraphics!: Phaser.GameObjects.Graphics;
   private uiObjects: Phaser.GameObjects.GameObject[] = [];
   private accounts: AccountData[] = [];
   private activeAccount: AccountData | null = null;
@@ -288,30 +285,12 @@ class GameScene extends Phaser.Scene {
     this.lockGraphics = this.add.graphics();
     this.lockGraphics.setDepth(30);
 
+    this.coinHudGraphics = this.add.graphics();
+    this.coinHudGraphics.setDepth(50);
+
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.keyLaser = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.A);
     this.keyMissiles = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.S);
-
-    this.hudText = this.add.text(24, 20, "", {
-      fontFamily: "Arial",
-      fontSize: "26px",
-      color: "#f9fbff",
-      stroke: "#101827",
-      strokeThickness: 5
-    });
-    this.hudText.setDepth(50);
-    this.hudText.setVisible(false);
-
-    this.statusText = this.add.text(GAME_WIDTH / 2, 84, "", {
-      fontFamily: "Arial",
-      fontSize: "24px",
-      color: "#ffe28a",
-      stroke: "#101827",
-      strokeThickness: 5
-    });
-    this.statusText.setOrigin(0.5);
-    this.statusText.setDepth(50);
-    this.statusText.setVisible(false);
 
     this.physics.add.overlap(this.missiles, this.enemies, (missile, enemy) => this.onMissileHitEnemy(missile, enemy));
     this.physics.add.overlap(this.missiles, this.weakpoints, (missile, weakpoint) =>
@@ -330,10 +309,6 @@ class GameScene extends Phaser.Scene {
     }
 
     this.elapsedMs += delta;
-    if (this.elapsedMs >= GAME_CONFIG.durationMs) {
-      this.endGame(false);
-      return;
-    }
 
     this.movePlayer();
     this.updatePlayerEffects(delta);
@@ -346,7 +321,7 @@ class GameScene extends Phaser.Scene {
     this.handleWeapons(time);
     this.handleLaser(time);
     this.handleBarrier();
-    this.updateHud();
+    this.updateCoinHud();
   }
 
   private createTextures() {
@@ -359,6 +334,7 @@ class GameScene extends Phaser.Scene {
     this.makeCircleTexture("enemyBullet", 0xffb1d8, 12, 0xffffff);
     this.makeCircleTexture("starParticle", 0xffeb75, 8, 0xffffff);
     this.makeCircleTexture("weakpoint", 0xff2036, 16, 0xffffff);
+    this.makeCoinTexture();
     this.makeGlowTexture();
     this.makeBossTextures();
   }
@@ -415,6 +391,18 @@ class GameScene extends Phaser.Scene {
     g.fillStyle(0xb7ff55, 0.1);
     g.fillCircle(80, 80, 52);
     g.generateTexture("playerGlow", 160, 160);
+    g.destroy();
+  }
+
+  private makeCoinTexture() {
+    const g = this.make.graphics({ x: 0, y: 0 });
+    g.fillStyle(0xffc857, 1);
+    g.fillCircle(26, 26, 22);
+    g.lineStyle(5, 0xffe66d, 1);
+    g.strokeCircle(26, 26, 18);
+    g.fillStyle(0xffffff, 0.45);
+    g.fillEllipse(19, 17, 12, 8);
+    g.generateTexture("coinIcon", 52, 52);
     g.destroy();
   }
 
@@ -1026,19 +1014,17 @@ class GameScene extends Phaser.Scene {
     this.player.setPosition(GAME_WIDTH / 2, GAME_HEIGHT - 160);
     this.player.setTint(this.getEquippedColor("ship"));
     this.playerGlow.setPosition(this.player.x, this.player.y);
-    this.statusText.setText("方向鍵移動  A 雷射  S 飛彈");
   }
 
   private setPlayVisible(visible: boolean) {
     this.player?.setVisible(visible);
     this.playerGlow?.setVisible(visible);
-    this.hudText?.setVisible(visible);
-    this.statusText?.setVisible(visible);
     if (!visible) {
       this.lockGraphics?.clear();
       this.laserGraphics?.clear();
       this.barrierGraphics?.clear();
       this.bossHpGraphics?.clear();
+      this.coinHudGraphics?.clear();
     }
   }
 
@@ -1054,6 +1040,7 @@ class GameScene extends Phaser.Scene {
     this.laserGraphics?.clear();
     this.barrierGraphics?.clear();
     this.bossHpGraphics?.clear();
+    this.coinHudGraphics?.clear();
   }
 
   private getEquippedColor(kind: EquipmentKind) {
@@ -1089,7 +1076,6 @@ class GameScene extends Phaser.Scene {
 
     if (!this.boss) {
       this.spawnBoss(time);
-      this.showStatus(`${BOSS_DEFS[this.selectedLevel - 1].name} 出現了`);
     }
 
     if (this.boss?.def.behavior === "wormhole" && time > this.boss.nextSummonAt) {
@@ -1100,7 +1086,7 @@ class GameScene extends Phaser.Scene {
 
   private spawnEnemies(time: number) {
     if (time < this.nextEnemyAt) return;
-    const phase = this.elapsedMs / GAME_CONFIG.durationMs;
+    const phase = Math.min(1, this.elapsedMs / GAME_CONFIG.bossSpawnMs);
     const count = phase > 0.75 ? Phaser.Math.Between(2, 4) : phase > 0.34 ? Phaser.Math.Between(1, 3) : 1;
     for (let i = 0; i < count; i += 1) this.createEnemy(phase);
     const delay = phase > 0.75 ? 520 : phase > 0.34 ? 780 : 1050;
@@ -1117,9 +1103,16 @@ class GameScene extends Phaser.Scene {
           : roll > 0.45
             ? "bubble"
             : "drifter";
-    const enemy = this.physics.add.image(Phaser.Math.Between(70, GAME_WIDTH - 70), -70, `enemy_${kind}`);
+    const enemy = this.physics.add.image(
+      Phaser.Math.Between(70, GAME_WIDTH - 70),
+      Phaser.Math.Between(90, 360),
+      `enemy_${kind}`
+    );
     enemy.setDepth(12);
     enemy.setCircle(28, 8, 7);
+    enemy.setBounce(1, 1);
+    enemy.setCollideWorldBounds(true);
+    enemy.setVelocity(Phaser.Math.Between(-120, 120), Phaser.Math.Between(70, 150));
     enemy.setData("enemy", {
       kind,
       value: kind === "spark" ? 180 : kind === "shooter" ? 150 : 100,
@@ -1136,8 +1129,7 @@ class GameScene extends Phaser.Scene {
     this.enemies.children.each((child) => {
       const enemy = child as Phaser.Physics.Arcade.Image;
       const data = enemy.getData("enemy") as EnemyData;
-      const wave = Math.sin(time / 420 + data.waveOffset) * (data.kind === "bubble" ? 60 : 28);
-      enemy.setVelocity(wave, data.speed);
+      this.keepInBounds(enemy, 52, 112, GAME_WIDTH - 52, GAME_HEIGHT - 260, data.speed);
       enemy.setRotation(Math.sin(time / 300 + data.waveOffset) * 0.16);
       if (data.canShoot) {
         data.shootCooldown -= delta;
@@ -1146,21 +1138,18 @@ class GameScene extends Phaser.Scene {
           data.shootCooldown = Phaser.Math.Between(1250, 2200);
         }
       }
-      if (enemy.y > GAME_HEIGHT + 90) {
-        enemy.destroy();
-        this.scoreState.combo = 0;
-      }
       return true;
     });
   }
 
   private spawnBoss(time: number) {
     const def = BOSS_DEFS[this.selectedLevel - 1];
-    const sprite = this.physics.add.image(GAME_WIDTH / 2, 170, def.texture);
+    const sprite = this.physics.add.image(GAME_WIDTH / 2, 260, def.texture);
     sprite.setDepth(13);
     sprite.setScale(1);
-    sprite.setImmovable(true);
-    sprite.setVelocityX(70);
+    sprite.setBounce(1, 1);
+    sprite.setCollideWorldBounds(true);
+    sprite.setVelocity(80, 45);
 
     this.boss = {
       def,
@@ -1192,8 +1181,7 @@ class GameScene extends Phaser.Scene {
 
     const boss = this.boss;
     boss.phase += delta / 1000;
-    boss.sprite.setVelocityX(Math.sin(boss.phase * 0.75) * 90);
-    boss.sprite.y = 170 + Math.sin(boss.phase) * 18;
+    this.keepInBounds(boss.sprite, 150, 210, GAME_WIDTH - 150, 420, 100);
 
     boss.def.weakpoints.forEach((_offset, index) => {
       const weakpoint = this.weakpoints.getChildren()[index] as Phaser.Physics.Arcade.Image | undefined;
@@ -1203,15 +1191,51 @@ class GameScene extends Phaser.Scene {
       weakpoint.setRotation(Math.PI / 4 + Math.sin(time / 130) * 0.18);
     });
 
-    if (boss.sprite.x < 160) boss.phase = Math.abs(boss.phase);
-    if (boss.sprite.x > GAME_WIDTH - 160) boss.phase = -Math.abs(boss.phase);
-
     if (time > boss.nextShotAt) {
       this.fireBossPattern(time);
       boss.nextShotAt = time + (boss.def.behavior === "rainbow" ? 820 : 1150);
     }
 
     this.drawBossHp();
+  }
+
+  private keepInBounds(
+    object: Phaser.Physics.Arcade.Image,
+    minX: number,
+    minY: number,
+    maxX: number,
+    maxY: number,
+    speed: number
+  ) {
+    const body = object.body as Phaser.Physics.Arcade.Body | null;
+    if (!body) return;
+
+    let bounced = false;
+    if (object.x <= minX) {
+      object.x = minX;
+      body.velocity.x = Math.abs(body.velocity.x || speed);
+      bounced = true;
+    } else if (object.x >= maxX) {
+      object.x = maxX;
+      body.velocity.x = -Math.abs(body.velocity.x || speed);
+      bounced = true;
+    }
+
+    if (object.y <= minY) {
+      object.y = minY;
+      body.velocity.y = Math.abs(body.velocity.y || speed);
+      bounced = true;
+    } else if (object.y >= maxY) {
+      object.y = maxY;
+      body.velocity.y = -Math.abs(body.velocity.y || speed);
+      bounced = true;
+    }
+
+    if (bounced) {
+      const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
+      const nextSpeed = Phaser.Math.FloatBetween(speed * 0.72, speed * 1.18);
+      body.setVelocity(Math.cos(angle) * nextSpeed, Math.sin(angle) * nextSpeed);
+    }
   }
 
   private fireBossPattern(time: number) {
@@ -1347,7 +1371,6 @@ class GameScene extends Phaser.Scene {
 
   private fireMissiles(time: number) {
     if (this.lockedTargets.length === 0) {
-      this.showStatus("沒有目標，先靠近敵人");
       return;
     }
     this.lastMissileAt = time;
@@ -1360,7 +1383,6 @@ class GameScene extends Phaser.Scene {
       this.missiles.add(missile);
       this.scoreState.missilesFired += 1;
     });
-    this.showStatus(`飛彈齊射 x${this.lockedTargets.length}`);
   }
 
   private fireEnemyBullet(x: number, y: number, speed: number, mode: "straight" | "curve" = "straight", drift = 0) {
@@ -1400,7 +1422,6 @@ class GameScene extends Phaser.Scene {
     if (blocked) {
       this.barrierAlpha = 1;
       this.barrierScale = 0.92;
-      this.showStatus("12邊形防護罩啟動");
     }
   }
 
@@ -1520,7 +1541,7 @@ class GameScene extends Phaser.Scene {
     this.bossHpGraphics.clear();
     if (!this.boss) return;
     const x = 170;
-    const y = 138;
+    const y = 42;
     const width = 560;
     const pct = Phaser.Math.Clamp(this.boss.hp / this.boss.maxHp, 0, 1);
     this.bossHpGraphics.fillStyle(0x101827, 0.8);
@@ -1531,29 +1552,59 @@ class GameScene extends Phaser.Scene {
     this.bossHpGraphics.strokeRoundedRect(x, y, width, 30, 8);
   }
 
-  private updateHud() {
-    const remaining = Math.max(0, GAME_CONFIG.durationMs - this.elapsedMs);
-    const minutes = Math.floor(remaining / 60_000);
-    const seconds = Math.floor((remaining % 60_000) / 1000)
-      .toString()
-      .padStart(2, "0");
-    const bossText = this.boss ? `\nBoss ${this.boss.hp}/${this.boss.maxHp}` : "";
-    this.hudText.setText(
-      `關卡 ${this.selectedLevel}\n時間 ${minutes}:${seconds}\n分數 ${this.scoreState.score}\n金幣 +${this.scoreState.coinsEarned}\n連段 ${this.scoreState.combo}  鎖定 ${this.lockedTargets.length}${bossText}`
-    );
+  private updateCoinHud() {
+    this.coinHudGraphics.clear();
+    this.coinHudGraphics.fillStyle(0x101827, 0.62);
+    this.coinHudGraphics.fillRoundedRect(24, 24, 150, 66, 16);
+    this.coinHudGraphics.lineStyle(3, 0xffe66d, 0.8);
+    this.coinHudGraphics.strokeRoundedRect(24, 24, 150, 66, 16);
+    this.coinHudGraphics.fillStyle(0xffc857, 1);
+    this.coinHudGraphics.fillCircle(58, 57, 22);
+    this.coinHudGraphics.lineStyle(5, 0xffe66d, 1);
+    this.coinHudGraphics.strokeCircle(58, 57, 17);
+    this.coinHudGraphics.fillStyle(0xffffff, 0.42);
+    this.coinHudGraphics.fillEllipse(50, 49, 12, 8);
+    this.coinHudGraphics.fillStyle(0xf9fbff, 1);
+    const digits = this.scoreState.coinsEarned.toString();
+    this.coinHudGraphics.fillStyle(0xf9fbff, 1);
+    [...digits].forEach((digit, index) => {
+      this.drawDigit(96 + index * 18, 42, digit);
+    });
   }
 
-  private showStatus(message: string) {
-    this.statusText.setText(message);
-    this.statusText.setAlpha(1);
-    this.tweens.killTweensOf(this.statusText);
-    this.tweens.add({ targets: this.statusText, alpha: 0.55, duration: 800 });
+  private drawDigit(x: number, y: number, digit: string) {
+    const segments: Record<string, number[]> = {
+      "0": [0, 1, 2, 3, 4, 5],
+      "1": [1, 2],
+      "2": [0, 1, 6, 4, 3],
+      "3": [0, 1, 6, 2, 3],
+      "4": [5, 6, 1, 2],
+      "5": [0, 5, 6, 2, 3],
+      "6": [0, 5, 6, 4, 2, 3],
+      "7": [0, 1, 2],
+      "8": [0, 1, 2, 3, 4, 5, 6],
+      "9": [0, 1, 2, 3, 5, 6]
+    };
+    const active = segments[digit] ?? [];
+    const draw = (segment: number) => {
+      if (!active.includes(segment)) return;
+      const w = 14;
+      const h = 4;
+      if (segment === 0) this.coinHudGraphics.fillRoundedRect(x, y, w, h, 2);
+      if (segment === 1) this.coinHudGraphics.fillRoundedRect(x + 12, y + 2, h, w, 2);
+      if (segment === 2) this.coinHudGraphics.fillRoundedRect(x + 12, y + 18, h, w, 2);
+      if (segment === 3) this.coinHudGraphics.fillRoundedRect(x, y + 32, w, h, 2);
+      if (segment === 4) this.coinHudGraphics.fillRoundedRect(x - 2, y + 18, h, w, 2);
+      if (segment === 5) this.coinHudGraphics.fillRoundedRect(x - 2, y + 2, h, w, 2);
+      if (segment === 6) this.coinHudGraphics.fillRoundedRect(x, y + 16, w, h, 2);
+    };
+    for (let i = 0; i < 7; i += 1) draw(i);
   }
 
   private endGame(success: boolean) {
     if (this.mode !== "play") return;
     this.mode = "result";
-    this.resultMessage = success ? "Boss 擊退成功！" : "時間到，Boss 下次再挑戰！";
+    this.resultMessage = success ? "Boss 擊退成功！" : "任務結束";
     this.physics.pause();
     this.lockGraphics.clear();
     this.laserGraphics.clear();
