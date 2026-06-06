@@ -34,8 +34,6 @@ interface EnemyData {
   kind: EnemyKind;
   value: number;
   hp: number;
-  canShoot: boolean;
-  shootCooldown: number;
   waveOffset: number;
   speed: number;
 }
@@ -71,7 +69,6 @@ interface BossState {
   hp: number;
   maxHp: number;
   weakpointHp: number;
-  nextShotAt: number;
   nextSummonAt: number;
   phase: number;
 }
@@ -220,7 +217,6 @@ class GameScene extends Phaser.Scene {
   private bossHpGraphics!: Phaser.GameObjects.Graphics;
   private enemies!: Phaser.Physics.Arcade.Group;
   private missiles!: Phaser.Physics.Arcade.Group;
-  private enemyBullets!: Phaser.Physics.Arcade.Group;
   private weakpoints!: Phaser.Physics.Arcade.Group;
   private lockGraphics!: Phaser.GameObjects.Graphics;
   private coinHudGraphics!: Phaser.GameObjects.Graphics;
@@ -259,7 +255,6 @@ class GameScene extends Phaser.Scene {
 
     this.enemies = this.physics.add.group();
     this.missiles = this.physics.add.group();
-    this.enemyBullets = this.physics.add.group();
     this.weakpoints = this.physics.add.group();
 
     this.player = this.physics.add.image(GAME_WIDTH / 2, GAME_HEIGHT - 160, "playerShip");
@@ -331,7 +326,6 @@ class GameScene extends Phaser.Scene {
     this.makeEnemyTexture("enemy_shooter", 0xff8bd1, 0xa66cff);
     this.makeEnemyTexture("enemy_spark", 0xb7ff55, 0x2ee6a6);
     this.makeCircleTexture("missile", 0xfff4a3, 18, 0xff8f3d);
-    this.makeCircleTexture("enemyBullet", 0xffb1d8, 12, 0xffffff);
     this.makeCircleTexture("starParticle", 0xffeb75, 8, 0xffffff);
     this.makeCircleTexture("weakpoint", 0xff2036, 16, 0xffffff);
     this.makeCoinTexture();
@@ -871,86 +865,161 @@ class GameScene extends Phaser.Scene {
       this.shopMessage = "";
     }
 
-    this.addUi(
-      this.add
-        .text(GAME_WIDTH / 2, 70, `換裝備   金幣：${this.activeAccount.coins}`, {
-          fontFamily: "Arial",
-          fontSize: "30px",
-          color: "#f9fbff",
-          stroke: "#101827",
-          strokeThickness: 4,
-          fontStyle: "bold"
-        })
-        .setOrigin(0.5)
-    );
+    this.drawShopCoinCounter(GAME_WIDTH / 2, 70, this.activeAccount.coins, this.shopMessage !== "");
 
-    this.drawEquipmentRow("ship", "飛機顏色", 190);
-    this.drawEquipmentRow("laser", "雷射顏色", 415);
-    this.drawEquipmentRow("barrier", "防護罩顏色", 640);
+    this.drawEquipmentRow("ship", 190);
+    this.drawEquipmentRow("laser", 415);
+    this.drawEquipmentRow("barrier", 640);
 
-    this.addUi(
-      this.add
-        .text(GAME_WIDTH / 2, 862, this.shopMessage, {
-          fontFamily: "Arial",
-          fontSize: "23px",
-          color: "#ffe28a",
-          stroke: "#101827",
-          strokeThickness: 4,
-          align: "center"
-        })
-        .setOrigin(0.5)
-    );
-
-    const confirmLabel = this.pendingShopNext === "levelSelect" ? "確認換裝" : "確認換裝並出發";
-    this.addButton(GAME_WIDTH / 2, 940, confirmLabel, () => this.confirmLoadout(), 330, 0x0c9f87);
-    this.addButton(166, 1018, this.pendingShopNext === "levelSelect" ? "切換帳號" : "回關卡", () => {
+    this.addShopIconButton(GAME_WIDTH / 2, 930, "confirm", () => this.confirmLoadout(), 0x0c9f87);
+    this.addShopIconButton(150, 1008, "back", () => {
       if (this.pendingShopNext === "levelSelect") this.showAccountScreen();
       else this.showLevelSelectScreen();
-    }, 220, 0x38506f);
+    }, 0x38506f);
   }
 
-  private drawEquipmentRow(kind: EquipmentKind, title: string, y: number) {
-    if (!this.activeAccount) return;
+  private drawShopCoinCounter(x: number, y: number, coins: number, warning: boolean) {
+    const graphics = this.addUi(this.add.graphics());
+    const digitColor = warning ? 0xff6078 : 0xf9fbff;
+    graphics.fillStyle(0xffc857, 1);
+    graphics.fillCircle(x - 54, y, 24);
+    graphics.lineStyle(5, warning ? 0xff6078 : 0xffe66d, 1);
+    graphics.strokeCircle(x - 54, y, 18);
+    graphics.fillStyle(0xffffff, 0.42);
+    graphics.fillEllipse(x - 64, y - 8, 13, 9);
+    if (warning) {
+      graphics.lineStyle(4, 0xff6078, 0.9);
+      graphics.strokeCircle(x - 54, y, 32);
+    }
+    coins
+      .toString()
+      .split("")
+      .forEach((digit, index) => this.drawDigitAt(graphics, x - 12 + index * 20, y - 18, digit, 1, 0.95, digitColor));
+  }
 
-    this.addUi(
-      this.add
-        .text(86, y - 76, title, {
-          fontFamily: "Arial",
-          fontSize: "26px",
-          color: "#ffe28a",
-          stroke: "#101827",
-          strokeThickness: 4,
-          fontStyle: "bold"
-        })
-        .setOrigin(0, 0.5)
-    );
+  private addShopIconButton(
+    x: number,
+    y: number,
+    icon: "confirm" | "back",
+    onClick: () => void,
+    color: number
+  ) {
+    const button = this.addUi(this.add.graphics());
+    button.fillStyle(color, 0.92);
+    button.fillCircle(x, y, 52);
+    button.lineStyle(5, 0x75f7b1, 0.95);
+    button.strokeCircle(x, y, 52);
+    button.setInteractive(new Phaser.Geom.Circle(x, y, 58), Phaser.Geom.Circle.Contains);
+    button.on("pointerdown", onClick);
+
+    if (icon === "confirm") {
+      button.lineStyle(9, 0xffffff, 0.96);
+      button.lineBetween(x - 24, y + 2, x - 8, y + 20);
+      button.lineBetween(x - 8, y + 20, x + 30, y - 22);
+      return button;
+    }
+
+    button.lineStyle(8, 0xffffff, 0.96);
+    button.lineBetween(x + 24, y, x - 18, y);
+    button.lineBetween(x - 18, y, x + 2, y - 22);
+    button.lineBetween(x - 18, y, x + 2, y + 22);
+    return button;
+  }
+
+  private drawEquipmentRow(kind: EquipmentKind, y: number) {
+    if (!this.activeAccount) return;
 
     EQUIPMENT[kind].forEach((option, index) => {
       const x = 140 + index * 205;
       const owned = this.activeAccount!.owned[kind].includes(option.id);
       const selected = this.shopSelection[kind] === option.id;
-      const rect = this.addUi(this.add.rectangle(x, y, 166, 142, option.color, owned ? 0.9 : 0.28));
-      rect.setStrokeStyle(selected ? 7 : 3, selected ? 0xffffff : 0x38506f, selected ? 1 : 0.6);
-      rect.setInteractive({ useHandCursor: true });
-      rect.on("pointerdown", () => {
+      const hitArea = this.addUi(this.add.zone(x, y, 166, 142));
+      hitArea.setInteractive({ useHandCursor: true });
+      hitArea.on("pointerdown", () => {
         this.shopSelection[kind] = option.id;
         this.showShopScreen(this.pendingShopNext, false);
       });
 
-      const label = owned ? "已購買" : `${option.cost} 金幣`;
-      this.addUi(
-        this.add
-          .text(x, y + 4, `${option.label}\n${label}`, {
-            fontFamily: "Arial",
-            fontSize: "19px",
-            color: owned ? "#101827" : "#e1e7ef",
-            align: "center",
-            lineSpacing: 9,
-            fontStyle: "bold"
-          })
-          .setOrigin(0.5)
-      );
+      this.drawEquipmentPreview(kind, x, y, option.color, owned, selected, option.cost);
     });
+  }
+
+  private drawEquipmentPreview(
+    kind: EquipmentKind,
+    x: number,
+    y: number,
+    color: number,
+    owned: boolean,
+    selected: boolean,
+    cost: number
+  ) {
+    const alpha = owned ? 1 : 0.32;
+    const glow = this.addUi(this.add.graphics());
+    glow.fillStyle(selected ? 0x75f7b1 : 0x101827, selected ? 0.22 : 0.1);
+    glow.fillCircle(x, y - 4, selected ? 76 : 62);
+    if (selected) {
+      glow.lineStyle(7, 0xffffff, 0.92);
+      glow.strokeCircle(x, y - 4, 76);
+      glow.lineStyle(3, 0x75f7b1, 0.85);
+      glow.strokeCircle(x, y - 4, 62);
+    }
+
+    if (kind === "ship") {
+      const ship = this.addUi(this.add.image(x, y - 10, "playerShip"));
+      ship.setTint(color);
+      ship.setAlpha(alpha);
+      ship.setScale(0.72);
+    }
+
+    if (kind === "laser") {
+      const beam = this.addUi(this.add.graphics());
+      beam.fillStyle(color, 0.26 * alpha);
+      beam.fillRoundedRect(x - 18, y - 58, 36, 104, 12);
+      beam.lineStyle(12, color, 0.55 * alpha);
+      beam.lineBetween(x, y + 46, x, y - 58);
+      beam.lineStyle(5, 0xffffff, 0.88 * alpha);
+      beam.lineBetween(x, y + 46, x, y - 58);
+    }
+
+    if (kind === "barrier") {
+      const barrier = this.addUi(this.add.graphics());
+      const radius = 48;
+      barrier.fillStyle(color, 0.18 * alpha);
+      barrier.lineStyle(6, color, 0.82 * alpha);
+      barrier.beginPath();
+      for (let i = 0; i < 12; i += 1) {
+        const angle = -Math.PI / 2 + (i * Math.PI * 2) / 12;
+        const px = x + Math.cos(angle) * radius;
+        const py = y - 7 + Math.sin(angle) * radius;
+        if (i === 0) barrier.moveTo(px, py);
+        else barrier.lineTo(px, py);
+      }
+      barrier.closePath();
+      barrier.fillPath();
+      barrier.strokePath();
+    }
+
+    if (!owned) {
+      this.drawMiniCoinPrice(x - 26, y + 48, cost, alpha);
+    } else {
+      const check = this.addUi(this.add.graphics());
+      check.lineStyle(7, 0xffffff, 0.88);
+      check.lineBetween(x - 24, y + 48, x - 8, y + 62);
+      check.lineBetween(x - 8, y + 62, x + 30, y + 34);
+    }
+  }
+
+  private drawMiniCoinPrice(x: number, y: number, cost: number, alpha: number) {
+    const graphics = this.addUi(this.add.graphics());
+    graphics.fillStyle(0xffc857, alpha);
+    graphics.fillCircle(x, y, 14);
+    graphics.lineStyle(3, 0xffe66d, alpha);
+    graphics.strokeCircle(x, y, 10);
+    graphics.fillStyle(0xf9fbff, alpha);
+    cost
+      .toString()
+      .split("")
+      .forEach((digit, index) => this.drawDigitAt(graphics, x + 24 + index * 14, y - 17, digit, alpha, 0.72));
   }
 
   private confirmLoadout() {
@@ -1031,7 +1100,6 @@ class GameScene extends Phaser.Scene {
   private clearBattleObjects() {
     this.enemies?.clear(true, true);
     this.missiles?.clear(true, true);
-    this.enemyBullets?.clear(true, true);
     this.weakpoints?.clear(true, true);
     this.boss?.sprite.destroy();
     this.boss = null;
@@ -1117,8 +1185,6 @@ class GameScene extends Phaser.Scene {
       kind,
       value: kind === "spark" ? 180 : kind === "shooter" ? 150 : 100,
       hp: GAME_CONFIG.enemyHp,
-      canShoot: kind === "shooter" || kind === "spark",
-      shootCooldown: Phaser.Math.Between(850, 1600),
       waveOffset: Phaser.Math.FloatBetween(0, Math.PI * 2),
       speed: kind === "spark" ? 156 : kind === "shooter" ? 118 : Phaser.Math.Between(78, 110)
     } satisfies EnemyData);
@@ -1131,13 +1197,6 @@ class GameScene extends Phaser.Scene {
       const data = enemy.getData("enemy") as EnemyData;
       this.keepInBounds(enemy, 52, 112, GAME_WIDTH - 52, GAME_HEIGHT - 260, data.speed);
       enemy.setRotation(Math.sin(time / 300 + data.waveOffset) * 0.16);
-      if (data.canShoot) {
-        data.shootCooldown -= delta;
-        if (data.shootCooldown <= 0 && enemy.y > 80 && enemy.y < GAME_HEIGHT - 260) {
-          this.fireEnemyBullet(enemy.x, enemy.y + 30, 260);
-          data.shootCooldown = Phaser.Math.Between(1250, 2200);
-        }
-      }
       return true;
     });
   }
@@ -1157,7 +1216,6 @@ class GameScene extends Phaser.Scene {
       hp: GAME_CONFIG.bossHp,
       maxHp: GAME_CONFIG.bossHp,
       weakpointHp: GAME_CONFIG.bossHp / 5,
-      nextShotAt: time + 900,
       nextSummonAt: time + 1500,
       phase: Phaser.Math.FloatBetween(0, Math.PI * 2)
     };
@@ -1190,11 +1248,6 @@ class GameScene extends Phaser.Scene {
       weakpoint.setPosition(boss.sprite.x + data.offset.x, boss.sprite.y + data.offset.y);
       weakpoint.setRotation(Math.PI / 4 + Math.sin(time / 130) * 0.18);
     });
-
-    if (time > boss.nextShotAt) {
-      this.fireBossPattern(time);
-      boss.nextShotAt = time + (boss.def.behavior === "rainbow" ? 820 : 1150);
-    }
 
     this.drawBossHp();
   }
@@ -1241,24 +1294,6 @@ class GameScene extends Phaser.Scene {
     }
   }
 
-  private fireBossPattern(time: number) {
-    if (!this.boss) return;
-    const boss = this.boss;
-    if (boss.def.behavior === "rainbow") {
-      for (let i = -1; i <= 1; i += 1) {
-        this.fireEnemyBullet(boss.sprite.x + i * 46, boss.sprite.y + 82, 210, "curve", i * 50);
-      }
-      return;
-    }
-    if (boss.def.behavior === "robot") {
-      for (let i = -2; i <= 2; i += 1) {
-        this.fireEnemyBullet(boss.sprite.x + i * 34, boss.sprite.y + 78, 250);
-      }
-      return;
-    }
-    this.fireEnemyBullet(boss.sprite.x, boss.sprite.y + 90, boss.def.behavior === "bubble" ? 185 : 230);
-  }
-
   private updateProjectiles(delta: number) {
     this.missiles.children.each((child) => {
       const missile = child as Phaser.Physics.Arcade.Image;
@@ -1273,17 +1308,6 @@ class GameScene extends Phaser.Scene {
       return true;
     });
 
-    this.enemyBullets.children.each((child) => {
-      const bullet = child as Phaser.Physics.Arcade.Image;
-      const curve = bullet.getData("curve") as { originX: number; drift: number; phase: number; angle: number } | undefined;
-      if (curve) {
-        const wave = Math.sin(this.time.now / 250 + curve.phase) * curve.drift;
-        bullet.x += Math.cos(curve.angle + Math.PI / 2) * wave * 0.012;
-        bullet.y += Math.sin(curve.angle + Math.PI / 2) * wave * 0.012;
-      }
-      if (bullet.y > GAME_HEIGHT + 50 || bullet.x < -60 || bullet.x > GAME_WIDTH + 60) bullet.destroy();
-      return true;
-    });
   }
 
   private updateTargeting() {
@@ -1391,33 +1415,8 @@ class GameScene extends Phaser.Scene {
     });
   }
 
-  private fireEnemyBullet(x: number, y: number, speed: number, mode: "straight" | "curve" = "straight", drift = 0) {
-    const bullet = this.physics.add.image(x, y, "enemyBullet");
-    bullet.setDepth(11);
-    bullet.setCircle(10);
-    const angle = Phaser.Math.Angle.Between(x, y, this.player.x, this.player.y);
-    bullet.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
-    if (mode === "curve") {
-      bullet.setData("curve", { originX: x, drift, phase: Phaser.Math.FloatBetween(0, Math.PI * 2), angle });
-    }
-    this.enemyBullets.add(bullet);
-  }
-
   private handleBarrier() {
     let blocked = false;
-    this.enemyBullets.children.each((child) => {
-      const bullet = child as Phaser.Physics.Arcade.Image;
-      const distance = Phaser.Math.Distance.Between(this.player.x, this.player.y, bullet.x, bullet.y);
-      if (distance <= GAME_CONFIG.barrierRadius) {
-        bullet.destroy();
-        blocked = true;
-        this.scoreState.shieldBlocks += 1;
-        this.scoreState.score += 25 + this.scoreState.combo * 2;
-        this.spawnSparkles(this.player.x, this.player.y, this.getEquippedColor("barrier"), 8);
-      }
-      return true;
-    });
-
     this.enemies.children.each((child) => {
       const enemy = child as Phaser.Physics.Arcade.Image;
       const distance = Phaser.Math.Distance.Between(this.player.x, this.player.y, enemy.x, enemy.y);
@@ -1582,6 +1581,18 @@ class GameScene extends Phaser.Scene {
   }
 
   private drawDigit(x: number, y: number, digit: string) {
+    this.drawDigitAt(this.coinHudGraphics, x, y, digit);
+  }
+
+  private drawDigitAt(
+    graphics: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    digit: string,
+    alpha = 1,
+    scale = 1,
+    color = 0xf9fbff
+  ) {
     const segments: Record<string, number[]> = {
       "0": [0, 1, 2, 3, 4, 5],
       "1": [1, 2],
@@ -1595,17 +1606,19 @@ class GameScene extends Phaser.Scene {
       "9": [0, 1, 2, 3, 5, 6]
     };
     const active = segments[digit] ?? [];
+    graphics.fillStyle(color, alpha);
     const draw = (segment: number) => {
       if (!active.includes(segment)) return;
-      const w = 14;
-      const h = 4;
-      if (segment === 0) this.coinHudGraphics.fillRoundedRect(x, y, w, h, 2);
-      if (segment === 1) this.coinHudGraphics.fillRoundedRect(x + 12, y + 2, h, w, 2);
-      if (segment === 2) this.coinHudGraphics.fillRoundedRect(x + 12, y + 18, h, w, 2);
-      if (segment === 3) this.coinHudGraphics.fillRoundedRect(x, y + 32, w, h, 2);
-      if (segment === 4) this.coinHudGraphics.fillRoundedRect(x - 2, y + 18, h, w, 2);
-      if (segment === 5) this.coinHudGraphics.fillRoundedRect(x - 2, y + 2, h, w, 2);
-      if (segment === 6) this.coinHudGraphics.fillRoundedRect(x, y + 16, w, h, 2);
+      const w = 14 * scale;
+      const h = 4 * scale;
+      const r = 2 * scale;
+      if (segment === 0) graphics.fillRoundedRect(x, y, w, h, r);
+      if (segment === 1) graphics.fillRoundedRect(x + 12 * scale, y + 2 * scale, h, w, r);
+      if (segment === 2) graphics.fillRoundedRect(x + 12 * scale, y + 18 * scale, h, w, r);
+      if (segment === 3) graphics.fillRoundedRect(x, y + 32 * scale, w, h, r);
+      if (segment === 4) graphics.fillRoundedRect(x - 2 * scale, y + 18 * scale, h, w, r);
+      if (segment === 5) graphics.fillRoundedRect(x - 2 * scale, y + 2 * scale, h, w, r);
+      if (segment === 6) graphics.fillRoundedRect(x, y + 16 * scale, w, h, r);
     };
     for (let i = 0; i < 7; i += 1) draw(i);
   }
