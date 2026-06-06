@@ -520,13 +520,27 @@ class GameScene extends Phaser.Scene {
   private drawTargetLocks(time: number) {
     this.lockGraphics.clear();
     this.lockedEnemies.forEach((enemy, index) => {
-      const pulse = 1 + Math.sin(time / 120 + index) * 0.08;
-      const radius = 42 * pulse;
-      const color = Phaser.Display.Color.GetColor(255, 230 - index * 12, 105 + index * 20);
-      this.lockGraphics.lineStyle(3, color, 0.9);
-      this.lockGraphics.strokeCircle(enemy.x, enemy.y, radius);
-      this.lockGraphics.lineStyle(2, 0xffffff, 0.45);
-      this.lockGraphics.strokeCircle(enemy.x, enemy.y, radius + 8);
+      const flash = 0.35 + ((Math.sin(time / 95 + index * 1.7) + 1) / 2) * 0.65;
+      const radius = 48 + Math.sin(time / 150 + index) * 5;
+      this.lockGraphics.fillStyle(0xff2036, 0.08 + flash * 0.12);
+      this.lockGraphics.lineStyle(4, 0xff2036, flash);
+      this.lockGraphics.beginPath();
+      this.lockGraphics.moveTo(enemy.x, enemy.y - radius);
+      this.lockGraphics.lineTo(enemy.x + radius, enemy.y);
+      this.lockGraphics.lineTo(enemy.x, enemy.y + radius);
+      this.lockGraphics.lineTo(enemy.x - radius, enemy.y);
+      this.lockGraphics.closePath();
+      this.lockGraphics.fillPath();
+      this.lockGraphics.strokePath();
+
+      this.lockGraphics.lineStyle(2, 0xff8a8a, flash * 0.75);
+      this.lockGraphics.beginPath();
+      this.lockGraphics.moveTo(enemy.x, enemy.y - radius - 10);
+      this.lockGraphics.lineTo(enemy.x + radius + 10, enemy.y);
+      this.lockGraphics.lineTo(enemy.x, enemy.y + radius + 10);
+      this.lockGraphics.lineTo(enemy.x - radius - 10, enemy.y);
+      this.lockGraphics.closePath();
+      this.lockGraphics.strokePath();
     });
   }
 
@@ -769,7 +783,7 @@ class GameScene extends Phaser.Scene {
       .text(
         GAME_WIDTH / 2,
         GAME_HEIGHT / 2 + 142,
-        `擊中 ${this.scoreState.hits}  最佳連段 ${this.scoreState.bestCombo}\n防護罩擋彈 ${this.scoreState.shieldBlocks}  近身防護 ${this.scoreState.saberSaves}`,
+        `擊中 ${this.scoreState.hits}  最佳連段 ${this.scoreState.bestCombo}\n防護罩擋彈 ${this.scoreState.shieldBlocks}`,
         {
           fontFamily: "Arial",
           fontSize: "26px",
@@ -801,9 +815,6 @@ class GameScene extends Phaser.Scene {
     }
     if (this.scoreState.hits >= 45 || this.scoreState.bestCombo >= 18) {
       medals.push("神射手獎章：鎖定飛彈超準");
-    }
-    if (this.scoreState.saberSaves >= 3) {
-      medals.push("近身守護獎章：防護罩保護成功");
     }
     return medals;
   }
