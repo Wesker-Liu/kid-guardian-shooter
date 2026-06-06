@@ -1112,7 +1112,7 @@ class GameScene extends Phaser.Scene {
     enemy.setCircle(28, 8, 7);
     enemy.setBounce(1, 1);
     enemy.setCollideWorldBounds(true);
-    enemy.setVelocity(Phaser.Math.Between(-120, 120), Phaser.Math.Between(70, 150));
+    enemy.setVelocity(Phaser.Math.Between(-150, 150) || 90, Phaser.Math.Between(70, 150));
     enemy.setData("enemy", {
       kind,
       value: kind === "spark" ? 180 : kind === "shooter" ? 150 : 100,
@@ -1211,30 +1211,33 @@ class GameScene extends Phaser.Scene {
     if (!body) return;
 
     let bounced = false;
-    if (object.x <= minX) {
+    if (object.x <= minX && body.velocity.x < 0) {
       object.x = minX;
-      body.velocity.x = Math.abs(body.velocity.x || speed);
+      body.velocity.x = Math.abs(body.velocity.x);
       bounced = true;
-    } else if (object.x >= maxX) {
+    } else if (object.x >= maxX && body.velocity.x > 0) {
       object.x = maxX;
-      body.velocity.x = -Math.abs(body.velocity.x || speed);
+      body.velocity.x = -Math.abs(body.velocity.x);
       bounced = true;
     }
 
-    if (object.y <= minY) {
+    if (object.y <= minY && body.velocity.y < 0) {
       object.y = minY;
-      body.velocity.y = Math.abs(body.velocity.y || speed);
+      body.velocity.y = Math.abs(body.velocity.y);
       bounced = true;
-    } else if (object.y >= maxY) {
+    } else if (object.y >= maxY && body.velocity.y > 0) {
       object.y = maxY;
-      body.velocity.y = -Math.abs(body.velocity.y || speed);
+      body.velocity.y = -Math.abs(body.velocity.y);
       bounced = true;
     }
 
     if (bounced) {
+      body.velocity.rotate(Phaser.Math.FloatBetween(-0.65, 0.65));
+    }
+
+    if (Math.abs(body.velocity.x) + Math.abs(body.velocity.y) < 24) {
       const angle = Phaser.Math.FloatBetween(0, Math.PI * 2);
-      const nextSpeed = Phaser.Math.FloatBetween(speed * 0.72, speed * 1.18);
-      body.setVelocity(Math.cos(angle) * nextSpeed, Math.sin(angle) * nextSpeed);
+      body.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
     }
   }
 
@@ -1272,9 +1275,12 @@ class GameScene extends Phaser.Scene {
 
     this.enemyBullets.children.each((child) => {
       const bullet = child as Phaser.Physics.Arcade.Image;
-      const curve = bullet.getData("curve") as { baseX: number; drift: number; phase: number } | undefined;
-      if (curve) bullet.x = curve.baseX + Math.sin(this.time.now / 250 + curve.phase) * curve.drift;
-      if (bullet.body && Math.abs(bullet.body.velocity.y) < 1) bullet.setVelocityY(260);
+      const curve = bullet.getData("curve") as { originX: number; drift: number; phase: number; angle: number } | undefined;
+      if (curve) {
+        const wave = Math.sin(this.time.now / 250 + curve.phase) * curve.drift;
+        bullet.x += Math.cos(curve.angle + Math.PI / 2) * wave * 0.012;
+        bullet.y += Math.sin(curve.angle + Math.PI / 2) * wave * 0.012;
+      }
       if (bullet.y > GAME_HEIGHT + 50 || bullet.x < -60 || bullet.x > GAME_WIDTH + 60) bullet.destroy();
       return true;
     });
@@ -1389,8 +1395,11 @@ class GameScene extends Phaser.Scene {
     const bullet = this.physics.add.image(x, y, "enemyBullet");
     bullet.setDepth(11);
     bullet.setCircle(10);
-    bullet.setVelocity(0, speed);
-    if (mode === "curve") bullet.setData("curve", { baseX: x, drift, phase: Phaser.Math.FloatBetween(0, Math.PI * 2) });
+    const angle = Phaser.Math.Angle.Between(x, y, this.player.x, this.player.y);
+    bullet.setVelocity(Math.cos(angle) * speed, Math.sin(angle) * speed);
+    if (mode === "curve") {
+      bullet.setData("curve", { originX: x, drift, phase: Phaser.Math.FloatBetween(0, Math.PI * 2), angle });
+    }
     this.enemyBullets.add(bullet);
   }
 
