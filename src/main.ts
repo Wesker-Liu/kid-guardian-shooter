@@ -230,6 +230,8 @@ class GameScene extends Phaser.Scene {
   private uiObjects: Phaser.GameObjects.GameObject[] = [];
   private accounts: AccountData[] = [];
   private activeAccount: AccountData | null = null;
+  private accountDraftName = "";
+  private accountKeyHandler?: (event: KeyboardEvent) => void;
   private selectedLevel = 1;
   private shopSelection: Record<EquipmentKind, string> = { ship: "sky", laser: "cyan", barrier: "aqua" };
   private lockedTargets: Phaser.Physics.Arcade.Image[] = [];
@@ -607,8 +609,16 @@ class GameScene extends Phaser.Scene {
   }
 
   private clearUi() {
+    this.stopAccountNameInput();
     this.uiObjects.forEach((object) => object.destroy());
     this.uiObjects = [];
+  }
+
+  private stopAccountNameInput() {
+    if (this.accountKeyHandler) {
+      this.input.keyboard?.off("keydown", this.accountKeyHandler);
+      this.accountKeyHandler = undefined;
+    }
   }
 
   private addButton(x: number, y: number, label: string, onClick: () => void, width = 280, color = 0x20344f) {
@@ -670,11 +680,74 @@ class GameScene extends Phaser.Scene {
       });
     });
 
-    this.addButton(GAME_WIDTH / 2, 780, "建立新帳號", () => {
-      const name = window.prompt("請輸入帳號名稱", `玩家${this.accounts.length + 1}`)?.trim();
-      if (!name) return;
+    this.addButton(GAME_WIDTH / 2, 780, "建立新帳號", () => this.showCreateAccountScreen());
+  }
+
+  private showCreateAccountScreen() {
+    this.mode = "account";
+    this.clearUi();
+    this.setPlayVisible(false);
+    this.accountDraftName = "";
+
+    this.addUi(
+      this.add
+        .text(GAME_WIDTH / 2, 130, "建立新帳號", {
+          fontFamily: "Arial",
+          fontSize: "52px",
+          color: "#f9fbff",
+          stroke: "#101827",
+          strokeThickness: 6,
+          fontStyle: "bold"
+        })
+        .setOrigin(0.5)
+    );
+
+    this.addUi(
+      this.add
+        .text(GAME_WIDTH / 2, 208, "直接用鍵盤輸入名稱，按 Enter 開始", {
+          fontFamily: "Arial",
+          fontSize: "25px",
+          color: "#ffe28a",
+          stroke: "#101827",
+          strokeThickness: 4
+        })
+        .setOrigin(0.5)
+    );
+
+    const inputBox = this.addUi(this.add.rectangle(GAME_WIDTH / 2, 360, 500, 82, 0xf9fbff, 0.96));
+    inputBox.setStrokeStyle(5, 0x75f7b1, 1);
+
+    const nameText = this.addUi(
+      this.add
+        .text(GAME_WIDTH / 2, 360, "輸入帳號名稱", {
+          fontFamily: "Arial",
+          fontSize: "34px",
+          color: "#6f7f94",
+          fontStyle: "bold"
+        })
+        .setOrigin(0.5)
+    );
+
+    const errorText = this.addUi(
+      this.add
+        .text(GAME_WIDTH / 2, 430, "", {
+          fontFamily: "Arial",
+          fontSize: "22px",
+          color: "#ff8a8a",
+          stroke: "#101827",
+          strokeThickness: 3
+        })
+        .setOrigin(0.5)
+    );
+
+    const submit = () => {
+      const name = this.accountDraftName.trim();
+      if (!name) {
+        errorText.setText("請輸入帳號名稱");
+        return;
+      }
       if (this.accounts.some((account) => account.name === name)) {
-        window.alert("這個帳號名稱已經存在");
+        errorText.setText("這個帳號名稱已經存在");
         return;
       }
       const account = createDefaultAccount(name);
@@ -682,7 +755,38 @@ class GameScene extends Phaser.Scene {
       this.activeAccount = account;
       this.saveAccounts();
       this.showLevelSelectScreen();
-    });
+    };
+
+    this.accountKeyHandler = (event: KeyboardEvent) => {
+      if (event.key === "Enter") {
+        submit();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+        this.accountDraftName = "";
+        nameText.setText("輸入帳號名稱");
+        nameText.setColor("#6f7f94");
+        errorText.setText("");
+        return;
+      }
+      if (event.key === "Backspace") {
+        this.accountDraftName = this.accountDraftName.slice(0, -1);
+        nameText.setText(this.accountDraftName || "輸入帳號名稱");
+        nameText.setColor(this.accountDraftName ? "#20344f" : "#6f7f94");
+        errorText.setText("");
+        return;
+      }
+      if (event.key.length === 1 && this.accountDraftName.length < 12) {
+        this.accountDraftName += event.key;
+        nameText.setText(this.accountDraftName);
+        nameText.setColor("#20344f");
+        errorText.setText("");
+      }
+    };
+    this.input.keyboard?.on("keydown", this.accountKeyHandler);
+
+    this.addButton(GAME_WIDTH / 2, 555, "開始", submit, 260, 0x0c9f87);
+    this.addButton(GAME_WIDTH / 2, 635, "返回", () => this.showAccountScreen(), 260, 0x38506f);
   }
 
   private showLevelSelectScreen() {
